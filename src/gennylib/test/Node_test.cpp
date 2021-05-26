@@ -36,6 +36,132 @@ struct HasConversionSpecialization {
 
 // namespace genny {
 
+TEST_CASE("Unused Values for strict mode") {
+    const NodeSource n{R"(
+a: [1, 2, 3]
+b: false
+c: []
+n: { ested: [v, alue] }
+t: { value: 11 }
+)", ""};
+    const auto& r = n.root();
+
+    const auto noneUsed = UnusedNodes{// We do depth-first.
+        "/a/0", "/a/1", "/a/2", "/b", "/c", "/n/ested/0", "/n/ested/1", "/t/value"
+    };
+
+    const auto onlyUsed = [=](std::initializer_list<std::string> ks) -> UnusedNodes {
+        auto out = noneUsed;
+        for (auto&& k : ks) {
+            out.erase(std::remove_if(
+                          out.begin(), out.end(), [&](const std::string& c) { return c == k; }),
+                      out.end());
+        }
+        return out;
+    };
+
+    SECTION("Only Root Used") {
+        REQUIRE(n.unused() == noneUsed);
+    }
+    SECTION("List used but no items used") {
+        REQUIRE(r["a"]);
+        REQUIRE(n.unused() == noneUsed);
+    }
+    SECTION("List of ints used via convert structs only uses the list not the items") {
+        // This is arguably a bug, but working around it is tedious.
+        //
+        // In the case of .to<X>, yaml-cpp's built-in conversions
+        // for std containers doesn't consult with genny::Node.
+        REQUIRE(r["a"].to<std::vector<int>>() == std::vector<int>{1, 2, 3});
+        // We'd really like this to be the same REQUIRE as in the "All items in a list used" case.
+        REQUIRE(n.unused() == onlyUsed({"/a"}));
+    }
+    SECTION("Multiple items in a list used") {
+        REQUIRE(r["a"][0].to<int>() == 1);
+        REQUIRE(r["a"][1].to<int>() == 2);
+        // Note we still didn't use "/a" despite using some of its children
+        REQUIRE(n.unused() == onlyUsed({"/a/0", "/a/1"}));
+    }
+    SECTION("All items in a list used") {
+        REQUIRE(r["a"][0].to<int>() == 1);
+        REQUIRE(r["a"][1].to<int>() == 2);
+        REQUIRE(r["a"][2].to<int>() == 3);
+        // We used all the children so we used "a" as well.
+        REQUIRE(n.unused() == onlyUsed({"/a/0", "/a/1", "/a/2", "/a"}));
+    }
+    SECTION("Use a false value") {
+        REQUIRE(r["b"].to<bool>() == false);
+        REQUIRE(n.unused() == onlyUsed({"/b"}));
+    }
+    SECTION("Use an empty list") {
+        REQUIRE(r["c"].to<std::vector<int>>().empty());
+        REQUIRE(n.unused() == onlyUsed({"/c"}));
+    }
+    SECTION("Use one nested value") {
+        REQUIRE(r["n"]["ested"][1].to<std::string>() == "alue");
+        REQUIRE(n.unused() == onlyUsed({"/n/ested/1"}));
+    }
+    SECTION("Use all nested values") {
+        REQUIRE(r["n"]["ested"][0].to<std::string>() == "v");
+        REQUIRE(r["n"]["ested"][1].to<std::string>() == "alue");
+        REQUIRE(n.unused() == onlyUsed({"/n/ested/0", "/n/ested/1", "/n/ested", "/n"}));
+    }
+    SECTION("Use entire doc") {
+        REQUIRE(r["a"][0].to<int>() == 1);
+        REQUIRE(r["a"][1].to<int>() == 2);
+        REQUIRE(r["a"][2].to<int>() == 3);
+        REQUIRE(r["b"].to<bool>() == false);
+        REQUIRE(r["c"].to<std::vector<int>>().empty());
+        REQUIRE(r["n"]["ested"][0].to<std::string>() == "v");
+        REQUIRE(r["n"]["ested"][1].to<std::string>() == "alue");
+        REQUIRE(r["t"]["value"].to<int>() == 11);
+        REQUIRE(r.unused().empty());
+    }
+    SECTION("Non-existent key used") {
+        auto m = r["does not exist"].maybe<int>();
+        REQUIRE(!m);
+        REQUIRE(n.unused() == noneUsed);
+    }
+    SECTION("Non-existent nested key used") {
+        auto m = r["does"]["not"]["ex"][1]["st"].maybe<int>();
+        REQUIRE(!m);
+        REQUIRE(n.unused() == noneUsed);
+    }
+    SECTION("Not unwrapping a maybe is fine.") {
+        auto m = r["b"].maybe<bool>();
+        REQUIRE(m);
+        REQUIRE(n.unused() == onlyUsed({"/b"}));
+    }
+    struct MyType {
+        int value;
+        explicit MyType(const Node& n, int mult = 1)
+            : value{(n["value"].maybe<int>().value_or(93) + 7) * mult} {}
+    };
+    SECTION("Using custom conversion counts as being used") {
+        auto t = r["t"].to<MyType>(3);
+        REQUIRE(t.value == 54);  // (11 + 7) * 3
+        REQUIRE(n.unused() == onlyUsed({"/t/value", "/t"}));
+    }
+    SECTION("Maybes also work") {
+        auto t = r["t"].maybe<MyType>(3);
+        REQUIRE(t->value == 54);  // (11 + 7) * 3
+        REQUIRE(n.unused() == onlyUsed({"/t/value", "/t"}));
+    }
+
+    SECTION("Maybes also work pt2") {
+        auto t = r["t"].maybe<MyType>();
+        REQUIRE(t->value == 18);  // (11 + 7) * (mult=1)
+        REQUIRE(n.unused() == onlyUsed({"/t/value", "/t"}));
+    }
+    SECTION("Maybes that fail to use the value don't use the value") {
+        // Use the 'n' structure (n:{ested:[v,alue]}) which doesn't have
+        // the "value" key that MyStruct wants to see.
+        auto t = r["n"].maybe<MyType>(5);
+        REQUIRE(t->value == 500);  // (93 + 7) * (mult=5)
+        REQUIRE(n.unused() == noneUsed);
+    }
+}
+
 TEST_CASE("Nested sequence like map") {
     NodeSource nodeSource("a: []", "");
     const auto& yaml = nodeSource.root();

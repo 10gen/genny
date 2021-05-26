@@ -17,6 +17,7 @@
 #include <thread>
 #include <vector>
 
+#include <boost/algorithm/string/join.hpp>
 #include <boost/exception/diagnostic_information.hpp>
 #include <boost/exception/exception.hpp>
 #include <boost/filesystem.hpp>
@@ -88,6 +89,46 @@ void reportMetrics(genny::metrics::Registry& metrics,
     actorSetup.report(std::move(finishTime), std::move(duration), std::move(outcome));
 }
 
+// Ugh. This is basically just implementing the following python:
+//     ignored = set("foo","bar")
+//     return [u for u in unused if not any(ignore in u for ignore in ignored)]
+//
+// The 'unused' param is pass by value because we need to modify it via remove_if.
+UnusedNodes removeFalsePositives(UnusedNodes unused) {
+    // The "Clients" key being looks bad but is actually okay for dry-run workloads since
+    // connection pools are lazily constructed on first access.
+
+    static const std::vector<std::string> ignored{".yml/Description", ".yml/Owner", ".yml/AutoRun", ".yml/Clients"};
+    UnusedNodes out{};
+    std::copy_if(
+        unused.begin(), unused.end(), std::back_inserter(out), [&](const std::string& path) {
+            // not any of the ignored values are in our path value.
+            return !std::any_of(ignored.begin(), ignored.end(), [&](const std::string& ignore) {
+                return path.find(ignore) != std::string::npos;
+            });
+        });
+    return out;
+}
+
+void reportUnused(const NodeSource& nodeSource) {
+    auto raw = nodeSource.unused();
+
+    auto unused = removeFalsePositives(raw);
+    auto many = std::distance(unused.begin(), unused.end());
+    auto verb = many == 1 ? "was" : "were";
+    auto plural = many == 1 ? "" : "s";
+    BOOST_LOG_TRIVIAL(info) << "<BETA FEATURE>";
+    BOOST_LOG_TRIVIAL(info) << "There " << verb << " " << many << " YAML structure" << plural
+                            << " not used when constructing the workload.";
+    if (!unused.empty()) {
+        BOOST_LOG_TRIVIAL(info) << "\n\t" << boost::algorithm::join(unused, "\n\t");
+        BOOST_LOG_TRIVIAL(info) << "False-positives are possible. "
+                                   "Please let us know in #workload-generation slack "
+                                   "if this looks wrong.";
+    }
+    BOOST_LOG_TRIVIAL(info) << "</BETA FEATURE>";
+}
+
 DefaultDriver::OutcomeCode doRunLogic(const DefaultDriver::ProgramOptions& options) {
     // setup logging as the first thing we do.
     boost::log::core::get()->set_filter(boost::log::trivial::severity >= options.logVerbosity);
@@ -151,6 +192,7 @@ DefaultDriver::OutcomeCode doRunLogic(const DefaultDriver::ProgramOptions& optio
     if (options.runMode == DefaultDriver::RunMode::kDryRun) {
         std::cout << "Workload context constructed without errors." << std::endl;
         reportMetrics(metrics, workloadName, true, startTime);
+        reportUnused(nodeSource);
         return DefaultDriver::OutcomeCode::kSuccess;
     }
 
@@ -208,6 +250,7 @@ DefaultDriver::OutcomeCode doRunLogic(const DefaultDriver::ProgramOptions& optio
         }
     }
 
+    reportUnused(nodeSource);
     return outcomeCode;
 }
 

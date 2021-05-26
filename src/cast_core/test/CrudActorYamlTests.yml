@@ -176,7 +176,7 @@ Tests:
             WriteConcern:
               Timeout: 3000 milliseconds
               Journal: false
-    Error: '.*bad conversion.*$'
+    Error: '.*InvalidKeyException.*'
 
   - Description: The 'test' collection is dropped with write concern majority.
     Operations:
@@ -274,7 +274,7 @@ Tests:
           Options:
             WriteConcern:
               Level: infinite
-    Error: '.*bad conversion.*'
+    Error: '.*Unknown writeConcern infinite.*'
 
   - Description: Read preference is 'secondaryPreferred'.
     Operations:
@@ -334,7 +334,7 @@ Tests:
           Options:
             ReadPreference:
               MaxStaleness: 100 seconds
-    Error: '.*bad conversion.*'
+    Error: '.*InvalidKeyException.*'
 
   - Description: Read preference with invalid 'ReadMode' should throw.
     Operations:
@@ -344,7 +344,7 @@ Tests:
           Options:
             ReadPreference:
               ReadMode: badReadMode
-    Error: '.*bad conversion.*'
+    Error: '.*InvalidKeyException.*'
 
   - Description: estimatedDocumentCount can also specify ReadMode, MaxStaleness
     Operations:

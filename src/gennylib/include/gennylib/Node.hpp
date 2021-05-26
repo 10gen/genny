@@ -32,6 +32,8 @@
 
 namespace genny {
 
+using UnusedNodes = std::vector<std::string>;
+
 /**
  * Source of all `genny::Node` instances.
  * This must outlive all `Node&`s handed out.
@@ -59,6 +61,9 @@ public:
      *   Likely a file-path from where the yaml was loaded.
      */
     NodeSource(std::string yaml, std::string path);
+
+    [[nodiscard]]
+    UnusedNodes unused() const;
 
 private:
     const YAML::Node _yaml;
@@ -103,6 +108,7 @@ public:
         return _value < rhs._value;
     }
 
+    [[nodiscard]]
     std::string toString() const;
 
     friend std::ostream& operator<<(std::ostream& out, const ::genny::v1::NodeKey& key) {
@@ -539,6 +545,10 @@ public:
 
     // Only intended to be used internally
     explicit Node(const v1::NodeKey::Path& path, const YAML::Node yaml);
+
+
+    [[nodiscard]]
+    UnusedNodes unused() const;
 
 private:
     friend class NodeImpl;

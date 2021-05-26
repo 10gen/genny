@@ -26,6 +26,13 @@ namespace genny {
 namespace {
 using namespace std::chrono;
 
+auto&& fromYaml(const std::string& yaml) {
+    // hacky but we can't return the .root() and then dangle the source root ref.
+    static std::optional<NodeSource> source;
+    source.emplace(yaml, "");
+    return source->root();
+}
+
 TEST_CASE("Conventions used by PhaseLoop") {
     NodeSource ns(R"(
     SchemaVersion: 2018-07-01
@@ -53,221 +60,185 @@ TEST_CASE("Conventions used by PhaseLoop") {
     REQUIRE(phaseContext["Rate"].maybe<RateSpec>() == std::nullopt);
     REQUIRE(phaseContext["RateLimiterName"].maybe<std::string>().value_or("defaultRateLimiter") ==
             "defaultRateLimiter");
-};
+}
 
 TEST_CASE("genny::TimeSpec conversions") {
     SECTION("Can convert to genny::TimeSpec") {
-        REQUIRE(YAML::Load("D: 3 seconds")["D"].as<TimeSpec>().count() == 3 * std::pow(10, 9));
-        REQUIRE(YAML::Load("0 second").as<TimeSpec>().count() == 0);
-        REQUIRE(YAML::Load("20 millisecond").as<TimeSpec>().count() == 20 * std::pow(10, 6));
-        REQUIRE(YAML::Load("33 microsecond").as<TimeSpec>().count() == 33 * std::pow(10, 3));
-        REQUIRE(YAML::Load("2e3 microseconds").as<TimeSpec>().count() == 2000 * std::pow(10, 3));
-        REQUIRE(YAML::Load("10.3e2 nanoseconds").as<TimeSpec>().count() == 1030);
-        REQUIRE(YAML::Load("3 hour").as<TimeSpec>().count() == 3 * 3600 * std::pow(10, 9));
-        REQUIRE(YAML::Load("2 minutes").as<TimeSpec>().count() == 2 * 60 * std::pow(10, 9));
+        REQUIRE(fromYaml("D: 3 seconds")["D"].to<TimeSpec>().count() == 3 * std::pow(10, 9));
+        REQUIRE(fromYaml("0 second").to<TimeSpec>().count() == 0);
+        REQUIRE(fromYaml("20 millisecond").to<TimeSpec>().count() == 20 * std::pow(10, 6));
+        REQUIRE(fromYaml("33 microsecond").to<TimeSpec>().count() == 33 * std::pow(10, 3));
+        REQUIRE(fromYaml("2e3 microseconds").to<TimeSpec>().count() == 2000 * std::pow(10, 3));
+        REQUIRE(fromYaml("10.3e2 nanoseconds").to<TimeSpec>().count() == 1030);
+        REQUIRE(fromYaml("3 hour").to<TimeSpec>().count() == 3 * 3600 * std::pow(10, 9));
+        REQUIRE(fromYaml("2 minutes").to<TimeSpec>().count() == 2 * 60 * std::pow(10, 9));
     }
 
     SECTION("Overlooks small typos") {
-        REQUIRE(YAML::Load("D: 3 secondsasdfadsf     ")["D"].as<TimeSpec>().count() ==
+        REQUIRE(fromYaml("D: 3 secondsasdfadsf     ")["D"].to<TimeSpec>().count() ==
                 3 * std::pow(10, 9));
     }
 
     SECTION("Barfs on unknown types") {
-        REQUIRE_THROWS(YAML::Load("-1 nanosecond").as<TimeSpec>());
-        REQUIRE_THROWS(YAML::Load("foo").as<TimeSpec>());
-        REQUIRE_THROWS(YAML::Load("[1,2,3]").as<TimeSpec>());
-        REQUIRE_THROWS(YAML::Load("[]").as<TimeSpec>());
-        REQUIRE_THROWS(YAML::Load("{}").as<TimeSpec>());
-        REQUIRE_THROWS(YAML::Load("what nanoseconds").as<TimeSpec>());
-        REQUIRE_THROWS(YAML::Load("29 picoseconds").as<TimeSpec>());
-        REQUIRE_THROWS(YAML::Load("1e3 centuries").as<TimeSpec>());
-        REQUIRE_THROWS(YAML::Load("mongodb").as<TimeSpec>());
-        REQUIRE_THROWS(YAML::Load("1").as<TimeSpec>());
-        REQUIRE_THROWS(YAML::Load("333").as<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("-1 nanosecond").to<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("foo").to<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("[1,2,3]").to<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("[]").to<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("{}").to<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("what nanoseconds").to<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("29 picoseconds").to<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("1e3 centuries").to<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("mongodb").to<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("1").to<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("333").to<TimeSpec>());
     }
 
     SECTION("Barfs on invalid number of spaces") {
-        REQUIRE_THROWS(YAML::Load("1  second").as<TimeSpec>());
-        REQUIRE_THROWS(YAML::Load("1second").as<TimeSpec>());
-    }
-
-    SECTION("Can encode") {
-        YAML::Node n;
-        n["Duration"] = TimeSpec{30};
-        REQUIRE(n["Duration"].as<TimeSpec>().count() == 30);
+        REQUIRE_THROWS(fromYaml("1  second").to<TimeSpec>());
+        REQUIRE_THROWS(fromYaml("1second").to<TimeSpec>());
     }
 }
 
 TEST_CASE("genny::IntegerSpec conversions") {
     SECTION("Can convert to genny::IntegerSpec") {
-        REQUIRE(YAML::Load("Repeat: 300")["Repeat"].as<IntegerSpec>().value == 300);
-        REQUIRE(YAML::Load("0").as<IntegerSpec>().value == 0);
-        REQUIRE(YAML::Load("1e3").as<IntegerSpec>().value == 1000);
-        REQUIRE(YAML::Load("10.3e2").as<IntegerSpec>().value == 1030);
+        REQUIRE(fromYaml("Repeat: 300")["Repeat"].to<IntegerSpec>().value == 300);
+        REQUIRE(fromYaml("0").to<IntegerSpec>().value == 0);
+        REQUIRE(fromYaml("1e3").to<IntegerSpec>().value == 1000);
+        REQUIRE(fromYaml("10.3e2").to<IntegerSpec>().value == 1030);
     }
 
     SECTION("Barfs on invalid values") {
-        REQUIRE_THROWS(YAML::Load("-1").as<IntegerSpec>());
-        REQUIRE_THROWS(YAML::Load("1e100000").as<IntegerSpec>());
-        REQUIRE_THROWS(YAML::Load("1e-3").as<IntegerSpec>());
-        REQUIRE_THROWS(YAML::Load("foo").as<IntegerSpec>());
-        REQUIRE_THROWS(YAML::Load("").as<IntegerSpec>());
-        REQUIRE_THROWS(YAML::Load("-e1").as<IntegerSpec>());
-        REQUIRE_THROWS(YAML::Load("e").as<IntegerSpec>());
-        REQUIRE_THROWS(YAML::Load("0.1").as<IntegerSpec>());
-        REQUIRE_THROWS(YAML::Load("-100.33e-1").as<IntegerSpec>());
-    }
-
-    SECTION("Can encode") {
-        YAML::Node n;
-        n["Repeat"] = IntegerSpec{30};
-        REQUIRE(n["Repeat"].as<IntegerSpec>().value == 30);
+        REQUIRE_THROWS(fromYaml("-1").to<IntegerSpec>());
+        REQUIRE_THROWS(fromYaml("1e100000").to<IntegerSpec>());
+        REQUIRE_THROWS(fromYaml("1e-3").to<IntegerSpec>());
+        REQUIRE_THROWS(fromYaml("foo").to<IntegerSpec>());
+        REQUIRE_THROWS(fromYaml("").to<IntegerSpec>());
+        REQUIRE_THROWS(fromYaml("-e1").to<IntegerSpec>());
+        REQUIRE_THROWS(fromYaml("e").to<IntegerSpec>());
+        REQUIRE_THROWS(fromYaml("0.1").to<IntegerSpec>());
+        REQUIRE_THROWS(fromYaml("-100.33e-1").to<IntegerSpec>());
     }
 }
 
 TEST_CASE("genny::BaseRateSpec conversions") {
     SECTION("Can convert to genny::BaseRateSpec") {
-        REQUIRE(YAML::Load("GlobalRate: 300 per 2 nanoseconds")["GlobalRate"]
-                    .as<BaseRateSpec>()
+        REQUIRE(fromYaml("GlobalRate: 300 per 2 nanoseconds")["GlobalRate"]
+                    .to<BaseRateSpec>()
                     .operations == 300);
-        REQUIRE(YAML::Load("GlobalRate: 300 per 2 nanoseconds")["GlobalRate"]
-                    .as<BaseRateSpec>()
+        REQUIRE(fromYaml("GlobalRate: 300 per 2 nanoseconds")["GlobalRate"]
+                    .to<BaseRateSpec>()
                     .per.count() == 2);
     }
 
     SECTION("Barfs on invalid values") {
-        REQUIRE_THROWS(YAML::Load("-1 per -1 nanosecond").as<BaseRateSpec>());
-        REQUIRE_THROWS(YAML::Load("-1 per -1 nanosecond").as<BaseRateSpec>());
-        REQUIRE_THROWS(YAML::Load("1 pe 1000 nanoseconds").as<BaseRateSpec>());
-        REQUIRE_THROWS(YAML::Load("per").as<BaseRateSpec>());
-        REQUIRE_THROWS(YAML::Load("nanoseconds per 1").as<BaseRateSpec>());
-        REQUIRE_THROWS(YAML::Load("1per2second").as<BaseRateSpec>());
-        REQUIRE_THROWS(YAML::Load("0per").as<BaseRateSpec>());
-        REQUIRE_THROWS(YAML::Load("xper").as<BaseRateSpec>());
-        REQUIRE_THROWS(YAML::Load("{foo}").as<BaseRateSpec>());
-        REQUIRE_THROWS(YAML::Load("").as<BaseRateSpec>());
-    }
-
-    SECTION("Can encode") {
-        YAML::Node n;
-        n["GlobalRate"] = BaseRateSpec{20, 30};
-        REQUIRE(n["GlobalRate"].as<BaseRateSpec>().per.count() == 20);
-        REQUIRE(n["GlobalRate"].as<BaseRateSpec>().operations == 30);
+        REQUIRE_THROWS(fromYaml("-1 per -1 nanosecond").to<BaseRateSpec>());
+        REQUIRE_THROWS(fromYaml("-1 per -1 nanosecond").to<BaseRateSpec>());
+        REQUIRE_THROWS(fromYaml("1 pe 1000 nanoseconds").to<BaseRateSpec>());
+        REQUIRE_THROWS(fromYaml("per").to<BaseRateSpec>());
+        REQUIRE_THROWS(fromYaml("nanoseconds per 1").to<BaseRateSpec>());
+        REQUIRE_THROWS(fromYaml("1per2second").to<BaseRateSpec>());
+        REQUIRE_THROWS(fromYaml("0per").to<BaseRateSpec>());
+        REQUIRE_THROWS(fromYaml("xper").to<BaseRateSpec>());
+        REQUIRE_THROWS(fromYaml("{foo}").to<BaseRateSpec>());
+        REQUIRE_THROWS(fromYaml("").to<BaseRateSpec>());
     }
 }
 
 TEST_CASE("genny::PercentileRateSpec conversions") {
     SECTION("Can convert to genny::PercentileRateSpec") {
-        REQUIRE(YAML::Load("GlobalRate: 50%")["GlobalRate"].as<PercentileRateSpec>().percent == 50);
-        REQUIRE(YAML::Load("GlobalRate: 78%")["GlobalRate"].as<PercentileRateSpec>().percent == 78);
-        REQUIRE(YAML::Load("GlobalRate: 5%")["GlobalRate"].as<PercentileRateSpec>().percent == 5);
+        REQUIRE(fromYaml("GlobalRate: 50%")["GlobalRate"].to<PercentileRateSpec>().percent == 50);
+        REQUIRE(fromYaml("GlobalRate: 78%")["GlobalRate"].to<PercentileRateSpec>().percent == 78);
+        REQUIRE(fromYaml("GlobalRate: 5%")["GlobalRate"].to<PercentileRateSpec>().percent == 5);
     }
 
     SECTION("Barfs on invalid values") {
-        REQUIRE_THROWS(YAML::Load("-1%").as<PercentileRateSpec>());
-        REQUIRE_THROWS(YAML::Load("2899").as<PercentileRateSpec>());
-        REQUIRE_THROWS(YAML::Load("300 per 2 nanoseconds").as<PercentileRateSpec>());
-        REQUIRE_THROWS(YAML::Load("%").as<PercentileRateSpec>());
-        REQUIRE_THROWS(YAML::Load("%15").as<PercentileRateSpec>());
-        REQUIRE_THROWS(YAML::Load("28.999%").as<PercentileRateSpec>());
-        REQUIRE_THROWS(YAML::Load("28.999%").as<PercentileRateSpec>());
-        REQUIRE_THROWS(YAML::Load("").as<PercentileRateSpec>());
-    }
-
-    SECTION("Can encode") {
-        YAML::Node n;
-        n["GlobalRate"] = PercentileRateSpec{25};
-        REQUIRE(n["GlobalRate"].as<PercentileRateSpec>().percent == 25);
+        REQUIRE_THROWS(fromYaml("-1%").to<PercentileRateSpec>());
+        REQUIRE_THROWS(fromYaml("2899").to<PercentileRateSpec>());
+        REQUIRE_THROWS(fromYaml("300 per 2 nanoseconds").to<PercentileRateSpec>());
+        REQUIRE_THROWS(fromYaml("%").to<PercentileRateSpec>());
+        REQUIRE_THROWS(fromYaml("%15").to<PercentileRateSpec>());
+        REQUIRE_THROWS(fromYaml("28.999%").to<PercentileRateSpec>());
+        REQUIRE_THROWS(fromYaml("28.999%").to<PercentileRateSpec>());
+        REQUIRE_THROWS(fromYaml("").to<PercentileRateSpec>());
     }
 }
 
 TEST_CASE("genny::RateSpec conversions") {
     SECTION("Can convert to genny::RateSpec") {
-        REQUIRE(YAML::Load("GlobalRate: 25 per 5 seconds")["GlobalRate"]
-                    .as<RateSpec>()
+        REQUIRE(fromYaml("GlobalRate: 25 per 5 seconds")["GlobalRate"]
+                    .to<RateSpec>()
                     .getBaseSpec()
                     ->operations == 25);
-        REQUIRE(YAML::Load("GlobalRate: 25 per 5 seconds")["GlobalRate"]
-                    .as<RateSpec>()
+        REQUIRE(fromYaml("GlobalRate: 25 per 5 seconds")["GlobalRate"]
+                    .to<RateSpec>()
                     .getBaseSpec()
                     ->per.count() == 5000000000);
-        REQUIRE_FALSE(YAML::Load("GlobalRate: 25 per 5 seconds")["GlobalRate"]
-                          .as<RateSpec>()
+        REQUIRE_FALSE(fromYaml("GlobalRate: 25 per 5 seconds")["GlobalRate"]
+                          .to<RateSpec>()
                           .getPercentileSpec());
 
-        REQUIRE(YAML::Load("GlobalRate: 30%")["GlobalRate"]
-                    .as<RateSpec>()
-                    .getPercentileSpec()
-                    ->percent == 30);
-        REQUIRE_FALSE(YAML::Load("GlobalRate: 30%")["GlobalRate"].as<RateSpec>().getBaseSpec());
+        REQUIRE(
+            fromYaml("GlobalRate: 30%")["GlobalRate"].to<RateSpec>().getPercentileSpec()->percent ==
+            30);
+        REQUIRE_FALSE(fromYaml("GlobalRate: 30%")["GlobalRate"].to<RateSpec>().getBaseSpec());
     }
 
     SECTION("Barfs on invalid values") {
-        REQUIRE_THROWS(YAML::Load("p%er").as<RateSpec>());
-        REQUIRE_THROWS(YAML::Load("25 nanoseconds per 1").as<RateSpec>());
-        REQUIRE_THROWS(YAML::Load("46%28").as<RateSpec>());
-        REQUIRE_THROWS(YAML::Load("{499}").as<RateSpec>());
-        REQUIRE_THROWS(YAML::Load("").as<RateSpec>());
-    }
-
-    SECTION("Can encode") {
-        auto base = BaseRateSpec{20, 30};
-        YAML::Node n1;
-        n1["GlobalRate"] = RateSpec{base};
-        REQUIRE(n1["GlobalRate"].as<RateSpec>().getBaseSpec()->per.count() == 20);
-        REQUIRE(n1["GlobalRate"].as<RateSpec>().getBaseSpec()->operations == 30);
-
-        auto percentile = PercentileRateSpec{75};
-        YAML::Node n2;
-        n2["GlobalRate"] = RateSpec{percentile};
-        REQUIRE(n2["GlobalRate"].as<RateSpec>().getPercentileSpec()->percent == 75);
+        REQUIRE_THROWS(fromYaml("p%er").to<RateSpec>());
+        REQUIRE_THROWS(fromYaml("25 nanoseconds per 1").to<RateSpec>());
+        REQUIRE_THROWS(fromYaml("46%28").to<RateSpec>());
+        REQUIRE_THROWS(fromYaml("{499}").to<RateSpec>());
+        REQUIRE_THROWS(fromYaml("").to<RateSpec>());
     }
 }
 
 
 TEST_CASE("genny::PhaseRangeSpec conversions") {
     SECTION("Can convert to genny::PhaseRangeSpec") {
-        auto yaml = YAML::Load("Phase: 0..20");
-        REQUIRE(yaml["Phase"].as<PhaseRangeSpec>().start == 0);
-        REQUIRE(yaml["Phase"].as<PhaseRangeSpec>().end == 20);
+        {
+            auto&& yaml = fromYaml("Phase: 0..20");
+            REQUIRE(yaml["Phase"].to<PhaseRangeSpec>().start == 0);
+            REQUIRE(yaml["Phase"].to<PhaseRangeSpec>().end == 20);
+        }
 
-        yaml = YAML::Load("Phase: 2..2");
-        REQUIRE(yaml["Phase"].as<PhaseRangeSpec>().start == 2);
-        REQUIRE(yaml["Phase"].as<PhaseRangeSpec>().end == 2);
+        {
+            auto&& yaml = fromYaml("Phase: 2..2");
+            REQUIRE(yaml["Phase"].to<PhaseRangeSpec>().start == 2);
+            REQUIRE(yaml["Phase"].to<PhaseRangeSpec>().end == 2);
+        }
 
-        yaml = YAML::Load("Phase: 0..1e2");
-        REQUIRE(yaml["Phase"].as<PhaseRangeSpec>().start == 0);
-        REQUIRE(yaml["Phase"].as<PhaseRangeSpec>().end == 100);
+        {
+            auto&& yaml = fromYaml("Phase: 0..1e2");
+            REQUIRE(yaml["Phase"].to<PhaseRangeSpec>().start == 0);
+            REQUIRE(yaml["Phase"].to<PhaseRangeSpec>().end == 100);
+        }
 
-        yaml = YAML::Load("Phase: 10 .. 1e2");
-        REQUIRE(yaml["Phase"].as<PhaseRangeSpec>().start == 10);
-        REQUIRE(yaml["Phase"].as<PhaseRangeSpec>().end == 100);
+        {
+            auto&& yaml = fromYaml("Phase: 10 .. 1e2");
+            REQUIRE(yaml["Phase"].to<PhaseRangeSpec>().start == 10);
+            REQUIRE(yaml["Phase"].to<PhaseRangeSpec>().end == 100);
+        }
 
-        yaml = YAML::Load("Phase: 12");
-        REQUIRE(yaml["Phase"].as<PhaseRangeSpec>().start == 12);
-        REQUIRE(yaml["Phase"].as<PhaseRangeSpec>().end == 12);
+        {
+            auto&& yaml = fromYaml("Phase: 12");
+            REQUIRE(yaml["Phase"].to<PhaseRangeSpec>().start == 12);
+            REQUIRE(yaml["Phase"].to<PhaseRangeSpec>().end == 12);
+        }
     }
 
     SECTION("Barfs on invalid values") {
-        REQUIRE_THROWS(YAML::Load("0....20").as<PhaseRangeSpec>());
-        REQUIRE_THROWS(YAML::Load("0.1").as<PhaseRangeSpec>());
-        REQUIRE_THROWS(YAML::Load("-1..1").as<PhaseRangeSpec>());
-        REQUIRE_THROWS(YAML::Load("0abc..20").as<PhaseRangeSpec>());
-        REQUIRE_THROWS(YAML::Load("0abc .. 20").as<PhaseRangeSpec>());
-        REQUIRE_THROWS(YAML::Load("10..4294967296").as<PhaseRangeSpec>());  // uint_max + 1
-        REQUIRE_THROWS(YAML::Load("4294967296..4294967296").as<PhaseRangeSpec>());
-        REQUIRE_THROWS(YAML::Load("20..25abc").as<PhaseRangeSpec>());
-        REQUIRE_THROWS(YAML::Load("-10").as<PhaseRangeSpec>());
-        REQUIRE_THROWS(YAML::Load("12abc").as<PhaseRangeSpec>());
-        REQUIRE_THROWS(YAML::Load("{foo}").as<PhaseRangeSpec>());
-        REQUIRE_THROWS(YAML::Load("").as<PhaseRangeSpec>());
-    }
-
-    SECTION("Can encode") {
-        YAML::Node n;
-        n["Phase"] = PhaseRangeSpec{0, 10};
-        REQUIRE(n["Phase"].as<PhaseRangeSpec>().start == 0);
-        REQUIRE(n["Phase"].as<PhaseRangeSpec>().end == 10);
+        REQUIRE_THROWS(fromYaml("0....20").to<PhaseRangeSpec>());
+        REQUIRE_THROWS(fromYaml("0.1").to<PhaseRangeSpec>());
+        REQUIRE_THROWS(fromYaml("-1..1").to<PhaseRangeSpec>());
+        REQUIRE_THROWS(fromYaml("0abc..20").to<PhaseRangeSpec>());
+        REQUIRE_THROWS(fromYaml("0abc .. 20").to<PhaseRangeSpec>());
+        REQUIRE_THROWS(fromYaml("10..4294967296").to<PhaseRangeSpec>());  // uint_max + 1
+        REQUIRE_THROWS(fromYaml("4294967296..4294967296").to<PhaseRangeSpec>());
+        REQUIRE_THROWS(fromYaml("20..25abc").to<PhaseRangeSpec>());
+        REQUIRE_THROWS(fromYaml("-10").to<PhaseRangeSpec>());
+        REQUIRE_THROWS(fromYaml("12abc").to<PhaseRangeSpec>());
+        REQUIRE_THROWS(fromYaml("{foo}").to<PhaseRangeSpec>());
+        REQUIRE_THROWS(fromYaml("").to<PhaseRangeSpec>());
     }
 }
 

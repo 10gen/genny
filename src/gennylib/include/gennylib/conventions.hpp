@@ -31,7 +31,7 @@
 namespace genny {
 
 /**
- * This function converts a YAML::Node into a given type and uses a given fallback.
+ * This function converts a genny::Node into a given type and uses a given fallback.
  * It simplifies a common pattern where you have a member variable that needs to be assigned either
  * the value in a node or a fallback value (traditionally, this involves at least a decltype).
  */
@@ -86,11 +86,11 @@ public:  // Members
     ValueT value;
 
 public:  // Operators
-    constexpr operator ValueT() const {
+    /* not explicit */ operator ValueT() const {
         return value;
     }
 
-    constexpr auto count() const {
+    [[nodiscard]] constexpr auto count() const {
         return value.count();
     }
 
@@ -163,7 +163,7 @@ public:
 
     RateSpec(PercentileRateSpec s) : _spec{s} {}
 
-    std::optional<BaseRateSpec> getBaseSpec() const {
+    [[nodiscard]] std::optional<BaseRateSpec> getBaseSpec() const {
         if (auto pval = std::get_if<BaseRateSpec>(&_spec)) {
             return *pval;
         } else {
@@ -171,7 +171,7 @@ public:
         }
     }
 
-    std::optional<PercentileRateSpec> getPercentileSpec() const {
+    [[nodiscard]] std::optional<PercentileRateSpec> getPercentileSpec() const {
         if (auto pval = std::get_if<PercentileRateSpec>(&_spec)) {
             return *pval;
         } else {
@@ -215,46 +215,16 @@ struct PhaseRangeSpec {
     genny::PhaseNumber end;
 };
 
-}  // namespace genny
-
-namespace YAML {
-
 using genny::decodeNodeInto;
 
 template <>
-struct convert<mongocxx::read_preference> {
-    using ReadPreference = mongocxx::read_preference;
+struct NodeConvert<mongocxx::read_preference> {
+    using type = mongocxx::read_preference;
     using ReadMode = mongocxx::read_preference::read_mode;
-    static Node encode(const ReadPreference& rhs) {
-        Node node;
-        auto mode = rhs.mode();
-        if (mode == ReadMode::k_primary) {
-            node["ReadMode"] = "primary";
-        } else if (mode == ReadMode::k_primary_preferred) {
-            node["ReadMode"] = "primaryPreferred";
-        } else if (mode == ReadMode::k_secondary) {
-            node["ReadMode"] = "secondary";
-        } else if (mode == ReadMode::k_secondary_preferred) {
-            node["ReadMode"] = "secondaryPreferred";
-        } else if (mode == ReadMode::k_nearest) {
-            node["ReadMode"] = "nearest";
-        }
-        auto maxStaleness = rhs.max_staleness();
-        if (maxStaleness) {
-            node["MaxStaleness"] = genny::TimeSpec(*maxStaleness);
-        }
-        return node;
-    }
 
-    static bool decode(const Node& node, ReadPreference& rhs) {
-        if (!node.IsMap()) {
-            return false;
-        }
-        if (!node["ReadMode"]) {
-            // readPreference must have a read mode specified.
-            return false;
-        }
-        auto readMode = node["ReadMode"].as<std::string>();
+    static type convert(const Node& node) {
+        type rhs{};
+        auto readMode = node["ReadMode"].to<std::string>();
         if (readMode == "primary") {
             rhs.mode(ReadMode::k_primary);
         } else if (readMode == "primaryPreferred") {
@@ -266,104 +236,68 @@ struct convert<mongocxx::read_preference> {
         } else if (readMode == "nearest") {
             rhs.mode(ReadMode::k_nearest);
         } else {
-            return false;
+            std::stringstream msg;
+            msg << "Unknown read mode " << readMode;
+            BOOST_THROW_EXCEPTION(InvalidConfigurationException(msg.str()));
         }
         if (node["MaxStaleness"]) {
-            auto maxStaleness = node["MaxStaleness"].as<genny::TimeSpec>();
+            auto maxStaleness = node["MaxStaleness"].to<genny::TimeSpec>();
             rhs.max_staleness(std::chrono::seconds{maxStaleness});
         }
-        return true;
+        return rhs;
     }
 };
 
 template <>
-struct convert<mongocxx::write_concern> {
-    using WriteConcern = mongocxx::write_concern;
-    static Node encode(const WriteConcern& rhs) {
-        Node node;
-        node["Timeout"] = genny::TimeSpec{rhs.timeout()};
+struct NodeConvert<mongocxx::write_concern> {
+    using type = mongocxx::write_concern;
 
-        auto journal = rhs.journal();
-        node["Journal"] = journal;
-
-        auto ackLevel = rhs.acknowledge_level();
-        if (ackLevel == WriteConcern::level::k_majority) {
-            node["Level"] = "majority";
-        } else if (ackLevel == WriteConcern::level::k_acknowledged) {
-            auto numNodes = rhs.nodes();
-            if (numNodes) {
-                node["Level"] = *numNodes;
-            }
-        }
-        return node;
-    }
-
-    static bool decode(const Node& node, WriteConcern& rhs) {
-        if (!node.IsMap()) {
-            return false;
-        }
-        if (!node["Level"]) {
-            // writeConcern must specify the write concern level.
-            return false;
-        }
-        auto level = node["Level"].as<std::string>();
+    static type convert(const Node& node) {
+        type rhs{};
         try {
-            auto level = node["Level"].as<int>();
+            auto level = node["Level"].to<int>();
             rhs.nodes(level);
-        } catch (const BadConversion& e) {
-            auto level = node["Level"].as<std::string>();
+        } catch (const InvalidConversionException& e) {
+            auto level = node["Level"].to<std::string>();
             if (level == "majority") {
                 rhs.majority(std::chrono::milliseconds{0});
             } else {
-                // writeConcern level must be of valid integer or 'majority'.
-                return false;
+                std::stringstream msg;
+                msg << "Unknown writeConcern " << level;
+                BOOST_THROW_EXCEPTION(InvalidConfigurationException(msg.str()));
             }
         }
         if (node["Timeout"]) {
-            auto timeout = node["Timeout"].as<genny::TimeSpec>();
+            auto timeout = node["Timeout"].to<genny::TimeSpec>();
             rhs.timeout(std::chrono::milliseconds{timeout});
         }
         if (node["Journal"]) {
-            auto journal = node["Journal"].as<bool>();
+            auto journal = node["Journal"].to<bool>();
             rhs.journal(journal);
         }
-        return true;
+        return rhs;
     }
 };
 
 template <>
-struct convert<mongocxx::read_concern> {
-    using ReadConcern = mongocxx::read_concern;
-    using ReadConcernLevel = mongocxx::read_concern::level;
-    static Node encode(const ReadConcern& rhs) {
-        Node node;
-        auto level = std::string(rhs.acknowledge_string());
-        if (!level.empty()) {
-            node["Level"] = level;
-        }
-        return node;
-    }
+struct NodeConvert<mongocxx::read_concern> {
+    using type = mongocxx::read_concern;
 
     static bool isValidReadConcernString(std::string_view rcString) {
         return (rcString == "local" || rcString == "majority" || rcString == "linearizable" ||
                 rcString == "snapshot" || rcString == "available");
     }
 
-    static bool decode(const Node& node, ReadConcern& rhs) {
-        if (!node.IsMap()) {
-            return false;
+    static type convert(const Node& node) {
+        type rhs{};
+        auto level = node["Level"].to<std::string>();
+        if (!isValidReadConcernString(level)) {
+            std::stringstream msg;
+            msg << "Unknown read read concern " << level;
+            BOOST_THROW_EXCEPTION(InvalidConfigurationException(msg.str()));
         }
-        if (!node["Level"]) {
-            // readConcern must have a read concern level specified.
-            return false;
-        }
-        auto level = node["Level"].as<std::string>();
-        if (isValidReadConcernString(level)) {
-            rhs.acknowledge_string(level);
-            return true;
-        } else {
-            return false;
-        }
+
+        return rhs;
     }
 };
 
@@ -374,18 +308,12 @@ struct convert<mongocxx::read_concern> {
  * This is used to stipulate repeating a phase N number of times
  */
 template <>
-struct convert<genny::PhaseRangeSpec> {
-    static Node encode(const genny::PhaseRangeSpec rhs) {
-        std::stringstream msg;
-        msg << rhs.start << ".." << rhs.end;
-        return Node{msg.str()};
-    }
+struct NodeConvert<genny::PhaseRangeSpec> {
+    using type = genny::PhaseRangeSpec;
 
-    static bool decode(const Node& node, genny::PhaseRangeSpec& rhs) {
-        if (node.IsSequence() || node.IsMap()) {
-            return false;
-        }
-        auto strRepr = node.as<std::string>();
+    static type convert(const Node& node) {
+        type rhs{};
+        auto strRepr = node.to<std::string>();
 
         // use '..' as delimiter.
         constexpr std::string_view delimiter = "..";
@@ -394,43 +322,43 @@ struct convert<genny::PhaseRangeSpec> {
         if (delimPos == std::string::npos) {
             // check if user inputted an integer
             try {
-                auto phaseNumberYaml = node.as<genny::IntegerSpec>();
+                auto phaseNumberYaml = node.to<genny::IntegerSpec>();
                 rhs = genny::PhaseRangeSpec(phaseNumberYaml);
-                return true;
+                return rhs;
             } catch (const genny::InvalidConfigurationException& e) {
                 std::stringstream msg;
                 msg << "Invalid value for genny::PhaseRangeSpec: '" << strRepr << "'."
                     << " The correct syntax is either a single integer or two integers delimited "
                        "by '..'";
-                throw genny::InvalidConfigurationException(msg.str());
+                BOOST_THROW_EXCEPTION(genny::InvalidConfigurationException(msg.str()));
             }
         }
 
-        genny::IntegerSpec start;
-        genny::IntegerSpec end;
+        genny::IntegerSpec start{};
+        genny::IntegerSpec end{};
 
-        auto startYaml = Load(strRepr.substr(0, delimPos));
-        auto endYaml = Load(strRepr.substr(delimPos + delimiter.size()));
+        auto startYaml = NodeSource(strRepr.substr(0, delimPos), node.path());
+        auto endYaml = NodeSource(strRepr.substr(delimPos + delimiter.size()), node.path());
 
         try {
-            start = startYaml.as<genny::IntegerSpec>();
-            end = endYaml.as<genny::IntegerSpec>();
+            start = startYaml.root().to<genny::IntegerSpec>();
+            end = endYaml.root().to<genny::IntegerSpec>();
         } catch (const genny::InvalidConfigurationException& e) {
             std::stringstream msg;
             msg << "Invalid value for genny::PhaseRangeSpec: '" << strRepr << "'."
                 << " The correct syntax is two integers delimited by '..'";
-            throw genny::InvalidConfigurationException(msg.str());
+            BOOST_THROW_EXCEPTION(genny::InvalidConfigurationException(msg.str()));
         }
 
         if (start > end) {
             std::stringstream msg;
             msg << "Invalid value for genny::PhaseRangeSpec: '" << strRepr << "'."
                 << " The start value cannot be greater than the end value.";
-            throw genny::InvalidConfigurationException(msg.str());
+            BOOST_THROW_EXCEPTION(genny::InvalidConfigurationException(msg.str()));
         }
         rhs = genny::PhaseRangeSpec(start, end);
 
-        return true;
+        return rhs;
     }
 };
 
@@ -441,18 +369,12 @@ struct convert<genny::PhaseRangeSpec> {
  * The syntax is interpreted as operations per unit of time.
  */
 template <>
-struct convert<genny::BaseRateSpec> {
-    static Node encode(const genny::BaseRateSpec& rhs) {
-        std::stringstream msg;
-        msg << rhs.operations << " per " << rhs.per.count() << " nanoseconds";
-        return Node{msg.str()};
-    }
+struct NodeConvert<genny::BaseRateSpec> {
+    using type = genny::BaseRateSpec;
 
-    static bool decode(const Node& node, genny::BaseRateSpec& rhs) {
-        if (node.IsSequence() || node.IsMap()) {
-            return false;
-        }
-        auto strRepr = node.as<std::string>();
+    static type convert(const Node& node) {
+        type rhs{};
+        auto strRepr = node.to<std::string>();
 
         // Use space as the delimiter.
         const std::string delimiter = " per ";
@@ -467,15 +389,15 @@ struct convert<genny::BaseRateSpec> {
             throw genny::InvalidConfigurationException(msg.str());
         }
 
-        auto opCountYaml = Load(strRepr.substr(0, spacePos));
-        auto opCount = opCountYaml.as<genny::IntegerSpec>();
+        auto opCountYaml = NodeSource(strRepr.substr(0, spacePos), node.path());
+        auto opCount = opCountYaml.root().to<genny::IntegerSpec>();
 
-        auto timeUnitYaml = Load(strRepr.substr(spacePos + delimiter.size()));
-        auto timeUnit = timeUnitYaml.as<genny::TimeSpec>();
+        auto timeUnitYaml = NodeSource(strRepr.substr(spacePos + delimiter.size()), node.path());
+        auto timeUnit = timeUnitYaml.root().to<genny::TimeSpec>();
 
         rhs = genny::BaseRateSpec(timeUnit, opCount);
 
-        return true;
+        return rhs;
     }
 };
 
@@ -486,18 +408,12 @@ struct convert<genny::BaseRateSpec> {
  * The syntax is interpreted as a percentage of the max throughput.
  */
 template <>
-struct convert<genny::PercentileRateSpec> {
-    static Node encode(const genny::PercentileRateSpec& rhs) {
-        std::stringstream msg;
-        msg << rhs.percent << "%";
-        return Node{msg.str()};
-    }
+struct NodeConvert<genny::PercentileRateSpec> {
+    using type = genny::PercentileRateSpec;
 
-    static bool decode(const Node& node, genny::PercentileRateSpec& rhs) {
-        if (node.IsSequence() || node.IsMap()) {
-            return false;
-        }
-        auto strRepr = node.as<std::string>();
+    static type convert(const Node& node) {
+        type rhs{};
+        auto strRepr = node.to<std::string>();
 
         // Use percent as the delimiter.
         const std::string delimiter = "%";
@@ -508,11 +424,11 @@ struct convert<genny::PercentileRateSpec> {
             msg << "Invalid value for PercentileRateSpec field, expected an integer followed by %."
                    " Saw: "
                 << strRepr;
-            throw genny::InvalidConfigurationException(msg.str());
+            BOOST_THROW_EXCEPTION(genny::InvalidConfigurationException(msg.str()));
         }
 
-        auto percentYaml = Load(strRepr.substr(0, percentPos));
-        auto percent = percentYaml.as<genny::IntegerSpec>();
+        auto percentYaml = NodeSource(strRepr.substr(0, percentPos), node.path());
+        auto percent = percentYaml.root().to<genny::IntegerSpec>();
 
         if (percent.value > 100) {
             std::stringstream msg;
@@ -520,12 +436,12 @@ struct convert<genny::PercentileRateSpec> {
                    "inclusive."
                    " Saw: "
                 << percent.value;
-            throw genny::InvalidConfigurationException(msg.str());
+            BOOST_THROW_EXCEPTION(genny::InvalidConfigurationException(msg.str()));
         }
 
         rhs = genny::PercentileRateSpec(percent);
 
-        return true;
+        return rhs;
     }
 };
 
@@ -539,48 +455,33 @@ struct convert<genny::PercentileRateSpec> {
  * percentage of max throughput.
  */
 template <>
-struct convert<genny::RateSpec> {
-    static Node encode(const genny::RateSpec& rhs) {
-        std::stringstream msg;
+struct NodeConvert<genny::RateSpec> {
+    using type = genny::RateSpec;
 
-        if (auto spec = rhs.getBaseSpec()) {
-            msg << spec->operations << " per " << spec->per.count() << " nanoseconds";
-        } else if (auto spec = rhs.getPercentileSpec()) {
-            msg << spec->percent << "%";
-        } else {
-            throw genny::InvalidConfigurationException("Cannot encode empty RateSpec.");
-        }
-
-        return Node{msg.str()};
-    }
-
-    static bool decode(const Node& node, genny::RateSpec& rhs) {
-        if (node.IsSequence() || node.IsMap()) {
-            return false;
-        }
-
-        auto strRepr = node.as<std::string>();
-        auto nodeYaml = Load(strRepr);
+    static type convert(const Node& node) {
+        type rhs{};
+        auto strRepr = node.to<std::string>();
+        auto nodeYaml = NodeSource(strRepr, node.path());
 
         // First treat as a BaseRateSpec, then try as a PercentileRateSpec.
         try {
-            auto baseSpec = nodeYaml.as<genny::BaseRateSpec>();
+            auto baseSpec = nodeYaml.root().to<genny::BaseRateSpec>();
             rhs = genny::RateSpec(baseSpec);
-            return true;
-        } catch (genny::InvalidConfigurationException e) {
+            return rhs;
+        } catch (const genny::InvalidConfigurationException& e) {
         }
 
         try {
-            auto percentileSpec = nodeYaml.as<genny::PercentileRateSpec>();
+            auto percentileSpec = nodeYaml.root().to<genny::PercentileRateSpec>();
             rhs = genny::RateSpec(percentileSpec);
-            return true;
-        } catch (genny::InvalidConfigurationException e) {
+            return rhs;
+        } catch (const genny::InvalidConfigurationException& e) {
         }
 
         std::stringstream msg;
         msg << "Invalid value for RateSpec field, expected a space separated integer and time unit,"
             << " or integer followed by %. Saw: " << strRepr;
-        throw genny::InvalidConfigurationException(msg.str());
+        BOOST_THROW_EXCEPTION(genny::InvalidConfigurationException(msg.str()));
     }
 };
 
@@ -591,17 +492,13 @@ struct convert<genny::RateSpec> {
  * The YAML syntax accepts regular and scientific notation decimal values.
  */
 template <>
-struct convert<genny::IntegerSpec> {
-    static Node encode(const genny::IntegerSpec& rhs) {
-        return Node{rhs.value};
-    }
+struct NodeConvert<genny::IntegerSpec> {
+    using type = genny::IntegerSpec;
 
-    static bool decode(const Node& node, genny::IntegerSpec& rhs) {
-        if (node.IsSequence() || node.IsMap()) {
-            return false;
-        }
+    static type convert(const Node& node) {
+        type rhs{};
 
-        auto strRepr = node.as<std::string>();
+        auto strRepr = node.to<std::string>();
         size_t pos = 0;
 
         // Use double here to support the scientific notation.
@@ -611,22 +508,22 @@ struct convert<genny::IntegerSpec> {
             std::stringstream msg;
             msg << "Invalid value for genny::IntegerSpec field: " << strRepr
                 << " from config: " << strRepr;
-            throw genny::InvalidConfigurationException(msg.str());
+            BOOST_THROW_EXCEPTION(genny::InvalidConfigurationException(msg.str()));
         }
 
         if (num < 0) {
             std::stringstream msg;
             msg << "Value for genny::IntegerSpec can't be negative: " << num
                 << " from config: " << strRepr;
-            ;
             throw genny::InvalidConfigurationException(msg.str());
         }
 
         rhs = genny::IntegerSpec(std::llround(num));
 
-        return true;
+        return rhs;
     }
 };
+
 
 /**
  * Convert between YAML and genny::Time.
@@ -634,19 +531,12 @@ struct convert<genny::IntegerSpec> {
  * The YAML syntax looks like [genny::Integer] [milliseconds/microseconds/etc...]
  */
 template <>
-struct convert<genny::TimeSpec> {
-    static Node encode(const genny::TimeSpec& rhs) {
-        std::stringstream msg;
-        msg << rhs.value.count() << " nanoseconds";
-        return Node{msg.str()};
-    }
+struct NodeConvert<genny::TimeSpec> {
+    using type = genny::TimeSpec;
 
-    static bool decode(const Node& node, genny::TimeSpec& rhs) {
-        if (node.IsSequence() || node.IsMap()) {
-            return false;
-        }
-
-        auto strRepr = node.as<std::string>();
+    static type convert(const Node& node) {
+        type rhs{};
+        auto strRepr = node.to<std::string>();
 
         // Use space as the delimiter.
         auto spacePos = strRepr.find_first_of(' ');
@@ -657,11 +547,11 @@ struct convert<genny::TimeSpec> {
                    "and "
                    "time unit. Saw: "
                 << strRepr;
-            throw genny::InvalidConfigurationException(msg.str());
+            BOOST_THROW_EXCEPTION(genny::InvalidConfigurationException(msg.str()));
         }
 
-        auto timeCountYaml = Load(strRepr.substr(0, spacePos));
-        auto timeCount = timeCountYaml.as<genny::IntegerSpec>().value;
+        NodeSource timeCountYaml{strRepr.substr(0, spacePos), node.path()};
+        auto timeCount = timeCountYaml.root().to<genny::IntegerSpec>().value;
 
         auto timeUnit = strRepr.substr(spacePos + 1);
 
@@ -682,14 +572,14 @@ struct convert<genny::TimeSpec> {
             std::stringstream msg;
             msg << "Invalid unit: " << timeUnit
                 << " for genny::TimeSpec field in config: " << strRepr;
-            throw genny::InvalidConfigurationException(msg.str());
+            BOOST_THROW_EXCEPTION(genny::InvalidConfigurationException(msg.str()));
         }
 
-        return true;
+        return rhs;
     }
 };
 
-}  // namespace YAML
+}  // namespace genny
 
 
 #endif  // HEADER_CC9B7EF0_9FB9_4AD4_B64C_DC7AE48F72A6_INCLUDED
