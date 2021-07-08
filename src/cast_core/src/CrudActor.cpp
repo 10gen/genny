@@ -44,22 +44,13 @@ using namespace genny;
 enum class ThrowMode {
     kSwallow,
     kRethrow,
-    kSwallowAndRecord,  // Record failed operations but don't throw.
 };
 
 ThrowMode decodeThrowMode(const Node& operation, PhaseContext& phaseContext) {
-    static const char* throwKey = "ThrowOnFailure";
-    // TODO: TIG-2805 Remove this mode once the underlying drivers issue is addressed.
-    static const char* ignoreKey = "RecordFailure";
+    static const char* key = "ThrowOnFailure";
 
-    bool throwOnFailure = operation[throwKey] ? operation[throwKey].to<bool>()
-                                              : phaseContext[throwKey].maybe<bool>().value_or(true);
-    bool ignoreFailure = operation[ignoreKey]
-        ? operation[ignoreKey].to<bool>()
-        : phaseContext[ignoreKey].maybe<bool>().value_or(false);
-    if (ignoreFailure) {
-        return ThrowMode::kSwallowAndRecord;
-    }
+    bool throwOnFailure =
+        operation[key] ? operation[key].to<bool>() : phaseContext[key].maybe<bool>().value_or(true);
     return throwOnFailure ? ThrowMode::kRethrow : ThrowMode::kSwallow;
 }
 
@@ -91,10 +82,6 @@ struct BaseOperation {
             if (throwMode == ThrowMode::kRethrow) {
                 ctx.failure();
                 BOOST_THROW_EXCEPTION(MongoException(x, info ? info->view() : emptyDoc.view()));
-            } else if (throwMode == ThrowMode::kSwallowAndRecord) {
-                // Record the failure but don't throw.
-                ctx.failure();
-                return;
             }
         }
         ctx.success();

@@ -36,8 +36,6 @@ Actors:
         - {a: 1}
         - {a: {^RandomString: {length: {^RandomInt: {min: 3, max: 5}}}}}
         - {b: {^RandomInt: {min: 5, max: 15}}}
-      ThrowOnFailure: false  # Whether to throw an exception if an operation fails
-#      RecordFailure: true  # If ThrowOnFailure is false, whether the failed operations should be recorded.
   - Repeat: 1
     Collection: test
     Operation:

@@ -14,7 +14,6 @@ Document: &doc
 
 UpdatePhase:
   Duration: *runtime
-  RecordFailure: true
   Collection: Collection0
   Operations:
   - OperationName: updateOne
@@ -26,7 +25,6 @@ UpdatePhase:
 
 RemovePhase:
   Duration: *runtime
-  RecordFailure: true
   Collection: Collection0
   Operations:
   - OperationName: deleteOne
@@ -35,7 +33,6 @@ RemovePhase:
 
 InsertPhase:
   Duration: *runtime
-  RecordFailure: true
   Collection: Collection0
   Operations:
   - OperationName: insertOne
@@ -44,7 +41,6 @@ InsertPhase:
 
 FindPhase:
   Duration: *runtime
-  RecordFailure: true
   Collection: Collection0
   Operations:
   - OperationName: findOne
