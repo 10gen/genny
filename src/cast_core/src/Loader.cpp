@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <locale>
 
 #include <bsoncxx/json.hpp>
 
@@ -76,6 +77,9 @@ void genny::actor::Loader::run() {
                 auto collectionName = "Collection" + std::to_string(i);
                 auto collection = config->database[collectionName];
                 // Insert the documents
+                BOOST_LOG_TRIVIAL(info) << "Starting to insert: "
+                                        << config->numDocuments << " docs "
+                                        << "into " << collectionName;
                 uint remainingInserts = config->numDocuments;
                 {
                     auto totalOpCtx = _totalBulkLoad.start();
@@ -117,8 +121,9 @@ void genny::actor::Loader::run() {
                         indexOpCtx.success();
                     }
                 }
+                BOOST_LOG_TRIVIAL(info) << "Done with load phase. All " <<
+                  config->numDocuments << " documents loaded into " << collectionName;
             }
-            BOOST_LOG_TRIVIAL(info) << "Done with load phase. All documents loaded";
         }
     }
 }

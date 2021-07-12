@@ -1,0 +1,119 @@
+SchemaVersion: 2018-07-01
+Owner: "@mongodb/product-perf"
+Description: |
+  Based on LongLivedTransactions Insert workload. Using to experiment with bulk load for PERF-2330
+
+GlobalDefaults:
+  dbname: &dbname perf2330
+  MaxPhases: &MaxPhases 20
+
+  # The Sample Document Shape.
+  Document: &Doc
+    ts: {^Now: {}}
+    caid: {^RandomInt: {min: 0, max: 1000}}
+    cuid: {^RandomInt: {min: 0, max: 100000}}
+    prod: {^RandomInt: {min: 0, max: 10000}}
+    price: {^RandomDouble: {min: 0.0, max: 1000.0}}
+    data: {^Join: {array: ["aaaaaaaaaa", {^FastRandomString: {length: {^RandomInt: {min: 0, max: 10}}}}]}}
+    c: &string {^RandomString: {length: 75}}  # Adjust this so the doc comes out as 200 B.
+
+  FirstIndex: &FirstIndex
+    - keys: {price: 1, ts: 1, cuid: 1}     # Ptc
+
+  MoreIndexes: &MoreIndexes
+    - keys: {price: 1, cuid: 1}            # Pc
+    - keys: {caid: 1, price: 1, cuid: 1}   # Cpc
+
+  # Loader Config.
+  LoadThreads: &LoadThreads 8
+  CollectionCount: &CollectionCount 8
+  LoadBatchSize: &LoadBatchSize 1000
+
+  InitialDocumentCount: &InitialNumDocs 5000000
+  SecondDocumentCount: &SecondNumDocs 3000000
+  FinalDocumentCount: &FinalDocumentCount 1000000
+
+Clients:
+  Default:
+    QueryOptions:
+      socketTimeoutMS: -1
+      maxPoolSize: 400
+
+Actors:
+- Name: InitialLoad
+  Type: Loader
+  Threads: *LoadThreads
+  Phases:
+    OnlyActiveInPhases:
+      Active: [1]
+      NopInPhasesUpTo: *MaxPhases
+      PhaseConfig:
+        Threads: *LoadThreads
+        CollectionCount: *CollectionCount
+        Database: *dbname
+        Repeat: 1
+        Document: *Doc
+        DocumentCount: *InitialNumDocs
+        Indexes: *FirstIndex
+        BatchSize: *LoadBatchSize
+
+- Name: SecondLoad
+  Type: Loader
+  Threads: *LoadThreads
+  Phases:
+    OnlyActiveInPhases:
+      Active: [3]
+      NopInPhasesUpTo: *MaxPhases
+      PhaseConfig:
+        Threads: *LoadThreads
+        CollectionCount: *CollectionCount
+        Database: *dbname
+        Repeat: 1
+        Document: *Doc
+        DocumentCount: *SecondNumDocs
+        Indexes: *MoreIndexes
+        BatchSize: *LoadBatchSize
+
+- Name: ThirdLoad
+  Type: Loader
+  Threads: *LoadThreads
+  Phases:
+    OnlyActiveInPhases:
+      Active: [5]
+      NopInPhasesUpTo: *MaxPhases
+      PhaseConfig:
+        Threads: *LoadThreads
+        CollectionCount: *CollectionCount
+        Database: *dbname
+        Repeat: 1
+        Document: *Doc
+        DocumentCount: *FinalDocumentCount
+        BatchSize: *LoadBatchSize
+
+- Name: QuiescePhase
+  Type: QuiesceActor
+  Threads: 1
+  Database: *dbname
+  Phases:
+    OnlyActiveInPhases:
+      Active: [0, 2, 4]
+      NopInPhasesUpTo: *MaxPhases
+      PhaseConfig:
+        Repeat: 1
+
+# Guard Against timeout for no output.
+- Name: LoggingActor
+  Type: LoggingActor
+  Threads: 1
+  Phases:
+    OnlyActiveInPhases:
+      Active: [1, 3, 5]
+      NopInPhasesUpTo: *MaxPhases
+      PhaseConfig:
+        LogEvery: 10 seconds
+        Blocking: None
+
+AutoRun:
+  Requires:
+    mongodb_setup:
+      - replica

@@ -29,10 +29,12 @@ namespace genny::actor {
 struct LoggingActor::PhaseConfig {
     TimeSpec logEvery;
     metrics::clock::time_point started;
+    metrics::clock::time_point last;
     unsigned iteration = 0;
 
     explicit PhaseConfig(PhaseContext& phaseContext)
         : logEvery{phaseContext["LogEvery"].to<TimeSpec>()}, started{metrics::clock::now()} {
+        last = started;
         if (phaseContext["Blocking"].to<std::string>() != "None") {
             BOOST_THROW_EXCEPTION(
                 InvalidConfigurationException("LoggingActor must have Blocking:None"));
@@ -46,10 +48,11 @@ struct LoggingActor::PhaseConfig {
         iteration = 0;
 
         const auto now = metrics::clock::now();
-        const auto duration = now - started;
+        const auto duration = now - last;
         if (duration >= logEvery.value) {
-            BOOST_LOG_TRIVIAL(info) << "Phase still progressing.";
-            started = now;
+            BOOST_LOG_TRIVIAL(info) << "Phase still progressing (" <<
+                std::chrono::duration_cast<std::chrono::seconds>(now - started).count() << "s)";
+            last = now;
         }
     }
 };
